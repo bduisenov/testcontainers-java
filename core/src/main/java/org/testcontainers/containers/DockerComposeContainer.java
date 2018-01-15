@@ -27,6 +27,7 @@ import org.zeroturnaround.exec.stream.slf4j.Slf4jStream;
 
 import java.io.File;
 import java.util.*;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -166,7 +167,9 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
     }
 
     private void registerContainersForShutdown() {
-        ResourceReaper.instance().registerFilterForCleanup("label=com.docker.compose.project=" + project);
+        ResourceReaper.instance().registerFilterForCleanup(Arrays.asList(
+                new SimpleEntry<>("label", "com.docker.compose.project=" + project)
+        ));
     }
 
     private List<Container> listChildContainers() {
