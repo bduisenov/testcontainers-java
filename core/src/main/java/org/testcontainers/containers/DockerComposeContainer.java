@@ -1,7 +1,6 @@
 package org.testcontainers.containers;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.model.Container;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
@@ -29,7 +28,6 @@ import org.zeroturnaround.exec.stream.slf4j.Slf4jStream;
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -55,6 +53,8 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
     private boolean localCompose;
     private boolean pull = true;
     private boolean tailChildContainers;
+
+    private String project;
 
     private static final Object MUTEX = new Object();
 
@@ -93,6 +93,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
 
         // Use a unique identifier so that containers created for this compose environment can be identified
         this.identifier = identifier;
+        project = identifier + Base58.randomString(6).toLowerCase();
 
         this.dockerClient = DockerClientFactory.instance().client();
     }
@@ -105,6 +106,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
         profiler.start("Docker Compose container startup");
 
         synchronized (MUTEX) {
+            ResourceReaper.instance().registerFilterForCleanup("label=com.docker.compose.project=" + project);
             if (pull) {
                 pullImages();
             }
@@ -113,7 +115,6 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
             if (tailChildContainers) {
                 tailChildContainerLogs();
             }
-            registerContainersForShutdown();
             startAmbassadorContainers(profiler);
         }
     }
@@ -141,9 +142,9 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
     private void runWithCompose(String cmd) {
         final DockerCompose dockerCompose;
         if (localCompose) {
-            dockerCompose = new LocalDockerCompose(composeFiles, identifier);
+            dockerCompose = new LocalDockerCompose(composeFiles, project);
         } else {
-            dockerCompose = new ContainerisedDockerCompose(composeFiles, identifier);
+            dockerCompose = new ContainerisedDockerCompose(composeFiles, project);
         }
 
         dockerCompose
@@ -165,30 +166,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
     }
 
     private void registerContainersForShutdown() {
-        // Ensure that all service containers that were launched by compose will be killed at shutdown
-        try {
-            final List<Container> containers = listChildContainers();
-
-            // register with ResourceReaper to ensure final shutdown with JVM
-            containers.forEach(container ->
-                    ResourceReaper.instance().registerContainerForCleanup(container.getId(), container.getNames()[0]));
-
-            // Compose can define their own networks as well; ensure these are cleaned up
-            dockerClient.listNetworksCmd().exec().forEach(network -> {
-                if (network.getName().contains(identifier)) {
-                    spawnedNetworkIds.add(network.getId());
-                    ResourceReaper.instance().registerNetworkIdForCleanup(network.getId());
-                }
-            });
-
-            // remember the IDs to allow containers to be killed as soon as we reach stop()
-            spawnedContainerIds.addAll(containers.stream()
-                    .map(Container::getId)
-                    .collect(Collectors.toSet()));
-
-        } catch (DockerException e) {
-            logger().debug("Failed to stop a service container with exception", e);
-        }
+        ResourceReaper.instance().registerFilterForCleanup("label=com.docker.compose.project=" + project);
     }
 
     private List<Container> listChildContainers() {
@@ -196,7 +174,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
                 .withShowAll(true)
                 .exec().stream()
                 .filter(container -> Arrays.stream(container.getNames()).anyMatch(name ->
-                        name.startsWith("/" + identifier)))
+                        name.startsWith("/" + project)))
                 .collect(toList());
     }
 
@@ -260,6 +238,8 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
 
             spawnedContainerIds.clear();
             spawnedNetworkIds.clear();
+
+            project = identifier + Base58.randomString(6).toLowerCase();
         }
     }
 
@@ -283,7 +263,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
          * as the rest of the compose environment.
          */
         AmbassadorContainer ambassadorContainer =
-                new AmbassadorContainer<>(new FutureContainer(this.identifier + "_" + serviceName), serviceName, servicePort)
+                new AmbassadorContainer<>(new FutureContainer(this.project + "_" + serviceName), serviceName, servicePort)
                         .withEnv(env);
 
         // Ambassador containers will all be started together after docker compose has started
