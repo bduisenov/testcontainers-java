@@ -94,7 +94,7 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
 
         // Use a unique identifier so that containers created for this compose environment can be identified
         this.identifier = identifier;
-        project = identifier + Base58.randomString(6).toLowerCase();
+        project = randomProjectId();
 
         this.dockerClient = DockerClientFactory.instance().client();
     }
@@ -218,31 +218,33 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
 
 
         synchronized (MUTEX) {
-            // shut down all the ambassador containers
-            ambassadorContainers.forEach((String address, AmbassadorContainer container) -> container.stop());
-
-            // Kill the services using docker-compose
             try {
-                runWithCompose("down -v");
+                // shut down all the ambassador containers
+                ambassadorContainers.forEach((String address, AmbassadorContainer container) -> container.stop());
 
-                // If we reach here then docker-compose down has cleared networks and containers;
-                //  we can unregister from ResourceReaper
-                spawnedContainerIds.forEach(ResourceReaper.instance()::unregisterContainer);
-                spawnedNetworkIds.forEach(ResourceReaper.instance()::unregisterNetwork);
-            } catch (Exception e) {
-                // docker-compose down failed; use ResourceReaper to ensure cleanup
+                // Kill the services using docker-compose
+                try {
+                    runWithCompose("down -v");
 
-                // kill the spawned service containers
-                spawnedContainerIds.forEach(ResourceReaper.instance()::stopAndRemoveContainer);
+                    // If we reach here then docker-compose down has cleared networks and containers;
+                    //  we can unregister from ResourceReaper
+                    spawnedContainerIds.forEach(ResourceReaper.instance()::unregisterContainer);
+                    spawnedNetworkIds.forEach(ResourceReaper.instance()::unregisterNetwork);
+                } catch (Exception e) {
+                    // docker-compose down failed; use ResourceReaper to ensure cleanup
 
-                // remove the networks after removing the containers
-                spawnedNetworkIds.forEach(ResourceReaper.instance()::removeNetworkById);
+                    // kill the spawned service containers
+                    spawnedContainerIds.forEach(ResourceReaper.instance()::stopAndRemoveContainer);
+
+                    // remove the networks after removing the containers
+                    spawnedNetworkIds.forEach(ResourceReaper.instance()::removeNetworkById);
+                }
+
+                spawnedContainerIds.clear();
+                spawnedNetworkIds.clear();
+            } finally {
+                project = randomProjectId();
             }
-
-            spawnedContainerIds.clear();
-            spawnedNetworkIds.clear();
-
-            project = identifier + Base58.randomString(6).toLowerCase();
         }
     }
 
@@ -355,6 +357,10 @@ public class DockerComposeContainer<SELF extends DockerComposeContainer<SELF>> e
 
     private SELF self() {
         return (SELF) this;
+    }
+
+    private String randomProjectId() {
+        return identifier + Base58.randomString(6).toLowerCase();
     }
 }
 
