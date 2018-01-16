@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fixed retrieval of Docker host IP when running inside Docker. ([\#479](https://github.com/testcontainers/testcontainers-java/issues/479))
 
+### Changed
+- Added "Death Note" to track & kill spawned containers even if the JVM was "kill -9"ed ([\#545](https://github.com/testcontainers/testcontainers-java/pull/545))
+
 ## [1.5.1] - 2017-12-19
 
 ### Fixed
